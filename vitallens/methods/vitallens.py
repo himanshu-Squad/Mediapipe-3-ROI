@@ -39,7 +39,7 @@ from vitallens.methods.rppg_method import RPPGMethod
 from vitallens.signal import detrend_lambda_for_hr_response, detrend_lambda_for_rr_response
 from vitallens.signal import moving_average_size_for_hr_response, moving_average_size_for_rr_response
 from vitallens.signal import reassemble_from_windows
-from vitallens.utils import probe_video_inputs, parse_video_inputs, check_faces_in_roi
+#from vitallens.utils import probe_video_inputs, parse_video_inputs, check_faces_in_roi
 
 class VitalLensRPPGMethod(RPPGMethod):
   def __init__(

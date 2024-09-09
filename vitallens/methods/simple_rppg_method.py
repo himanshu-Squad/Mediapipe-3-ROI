@@ -1,22 +1,4 @@
-# Copyright (c) 2024 Rouast Labs
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
+
 
 import abc
 import numpy as np
@@ -28,7 +10,7 @@ from typing import Union, Tuple
 
 from vitallens.constants import CALC_HR_MIN, CALC_HR_MAX
 from vitallens.methods.rppg_method import RPPGMethod
-from vitallens.utils import parse_video_inputs, merge_faces
+from vitallens.utils import merge_faces
 
 class SimpleRPPGMethod(RPPGMethod):
   def __init__(
@@ -78,40 +60,22 @@ class SimpleRPPGMethod(RPPGMethod):
     # Compute temporal union of ROIs
     u_roi = merge_faces(faces)
     faces = faces - [u_roi[0], u_roi[1], u_roi[0], u_roi[1]]
-    # Parse the inputs
-    frames_ds, fps, inputs_shape, ds_factor, _ = parse_video_inputs(
-      video=frames, fps=fps, target_size=None, roi=u_roi,
-      target_fps=override_fps_target if override_fps_target is not None else self.fps_target)   
-    assert inputs_shape[0] == faces.shape[0], "Need same number of frames as face detections"
-    faces_ds = faces[0::ds_factor]
-    assert frames_ds.shape[0] == faces_ds.shape[0], "Need same number of frames as face detections"
-    fps_ds = fps*1.0/ds_factor
-    # Extract rgb signal (n_frames_ds, 3)
-    roi_ds = np.asarray([get_roi_from_det(f, roi_method=self.roi_method) for f in faces_ds], dtype=np.int64) # roi for each frame (n, 4)
-    print("roi_ds",roi_ds)
-    rgb_ds = reduce_roi(video=frames_ds, roi=roi_ds) # RGB signal for each frame (n, 3)
-    print("rgb_ds",rgb_ds)
-    print("rgb_ds shape",rgb_ds.shape)
-    print("type of rgb_ds",type(rgb_ds))
-    #print("help of rgb_ds",help(rgb_ds))
-    # Perform rppg algorithm step (n_frames_ds,)
-    # TODO Replace RGB values of Vitallens 
-    # read excel file and store into dataframe
-    #import pandas as pd
-    #df = pd.read_excel('newrgb_data.xlsx')
-    #print(df.shape)
-    # convert dataframe to numpy array
-    #df=np.array(df)
-    
-    #rgb_ds=df
-    #print("type of dataframe df",type(df))
-    #print("type of new rgb_ds",type(rgb_ds))
-    #print("New_rgb_ds",rgb_ds)
-    #print("New_rgb_ds shape",rgb_ds.shape)
-    sig_ds = self.algorithm(rgb_ds, fps_ds) # Entering it pos algorihtms
+    # Reduce ROI and extract RGB signal
+    roi_ds = np.asarray([get_roi_from_det(f, roi_method=self.roi_method) for f in faces], dtype=np.int64)  # ROI for each frame (n, 4)
+    rgb_ds = reduce_roi(video=frames, roi=roi_ds)  # RGB signal for each frame (n, 3)
+
+    # Perform rPPG algorithm step
+    sig_ds = self.algorithm(rgb_ds, fps)
+
+    # Interpolate to original sampling rate
+    sig = interpolate_cubic_spline(
+            x=np.arange(rgb_ds.shape[0]), y=sig_ds, xs=np.arange(frames.shape[0]), axis=1)
+
+    # Filter
+    sig = self.pulse_filter(sig, fps)
     # Interpolate to original sampling rate (n_frames,)
     sig = interpolate_cubic_spline(
-      x=np.arange(inputs_shape[0])[0::ds_factor], y=sig_ds, xs=np.arange(inputs_shape[0]), axis=1)
+    x=np.arange(rgb_ds.shape[0]), y=sig_ds, xs=np.arange(frames.shape[0]), axis=1)
     # Filter (n_frames,)
     sig = self.pulse_filter(sig, fps)
     # Estimate HR
