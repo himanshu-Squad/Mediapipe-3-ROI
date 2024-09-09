@@ -95,7 +95,9 @@ def merge_faces(faces: np.ndarray) -> np.ndarray:
     """
     if len(faces) == 0:
         raise ValueError("No faces provided for merging.")
-
+    # Ensure faces have the correct shape
+    if len(faces.shape) != 2 or faces.shape[1] != 4:
+        raise ValueError(f"Expected faces to have shape (n_frames, 4), but got {faces.shape}")
     # Calculate the union of all faces
     x0 = np.min(faces[:, 0])
     y0 = np.min(faces[:, 1])

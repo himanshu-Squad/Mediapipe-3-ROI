@@ -99,7 +99,7 @@ class VitalLens:
         """
         # Probe inputs
         #inputs_shape, fps, _ = probe_video_inputs(video=video, fps=fps)
-        inputs_shape, fps, ds_factor = probe_video_inputs(video=video, fps=fps)
+        inputs_shape, fps, _ = probe_video_inputs(video=video, fps=fps)
 
         # Warning if using long video
         target_fps = override_fps_target if override_fps_target is not None else self.rppg.fps_target
@@ -122,53 +122,45 @@ class VitalLens:
                 # Ensure frame_faces has shape (n, 4), where n is the number of faces
                 frame_faces = np.array(frame_faces)  # Convert to numpy array if it's not already
                 print(f"Original frame_faces shape: {frame_faces.shape}, contents: {frame_faces}")
-
-                # Check if the shape is correct. It should be (n_faces, 4).
-                if frame_faces.size % 4 != 0:  # If last dimension is not 4, reshape
-                    logging.warning(f"Unexpected size of face data: {frame_faces.size}. Cannot reshape into bounding boxes.")
-                    continue
-                try:
-                    # Reshape to (n_faces, 4)
-                    frame_faces = frame_faces.reshape(-1, 4)  # Ensure it has the shape (n_faces, 4)
-                    print(f"Reshaped frame_faces shape: {frame_faces.shape}, contents: {frame_faces}")
-                except ValueError as e:
-                    logging.error(f"Error reshaping face data: {e}")
-                    continue
-
                 # Now we can safely multiply by [width, height, width, height]
+                if frame_faces.size == 0:
+                    # Skip if no faces are detected in this frame
+                    continue
+                 # Check if frame_faces shape is compatible with reshaping
+                if frame_faces.shape[-1] != 4:
+                    logging.error(f"Unexpected shape for frame_faces: {frame_faces.shape}")
+                    continue
+                # Reshape the frame_faces safely
+                try:
+                    frame_faces = frame_faces.reshape(-1, 4)  # Safely reshape to ensure it has the right shape
+                    logging.info(f"Reshaped frame_faces to {frame_faces.shape}")
+                except ValueError as e:
+                    logging.error(f"Error reshaping frame_faces: {e}")
+                    continue
                 abs_faces = frame_faces * np.array([width, height, width, height])
                 faces.append(abs_faces)
 
             faces = np.array(faces).astype(np.int64)
-
-            # Check the shape of faces before transposing
-            print(f"Shape of faces before transpose: {faces.shape}")
-            # Squeeze if the shape has an extra dimension
-            faces = np.squeeze(faces, axis=0) if faces.shape[0] == 1 else faces
-            print(f"Shape after squeezing: {faces.shape}")
-        
-            if faces.ndim == 2:
-                faces = np.expand_dims(faces, axis=0)  # Adjust dimensions if necessary
-            elif faces.ndim == 3 and faces.shape[0] == 1:
-                faces = np.expand_dims(faces, axis=1)  # Ensuring the faces dimension is correctly handled
-            if faces.ndim != 4:
-                logging.error(f"Invalid shape for faces: {faces.shape}, expected 4 dimensions.")
-                return []
-
-            try:
+            if faces.ndim == 3:  # Check if the shape is compatible for transposing
+                # Adding an additional axis to align with expected shape
+                faces = np.expand_dims(faces, axis=0)
+            elif faces.ndim == 2:
+                faces = np.expand_dims(faces, axis=0)
+            logging.info(f"Shape of faces before transpose: {faces.shape}")
+            # Transpose only if the dimensions are correct
+            if faces.ndim == 4:
                 faces = np.transpose(faces, (1, 0, 2, 3))
-                print(f"Shape of faces after transpose: {faces.shape}")
-            except ValueError as e:
-                logging.error(f"Error during transpose: {e}")
+            else:
+                logging.error(f"Cannot transpose faces with shape {faces.shape}")
                 return []
         else:
-            faces = check_faces(faces, inputs_shape)  
+            faces = check_faces(faces, inputs_shape)
         
         # Run separately for each face
         results = []
         for face in faces:
             # Run selected rPPG method
-            data, unit, conf, note, live, rgb_ds = self.rppg(
+            data, unit, conf, note, live, _ = self.rppg(
                 frames=video, faces=face, fps=fps,
                 override_fps_target=override_fps_target,
                 override_global_parse=override_global_parse
@@ -243,4 +235,6 @@ class VitalLens:
 # New detect_faces function that uses the FaceDetector
 def detect_faces(video, inputs_shape, fps):
     face_detector = FaceDetector(max_faces=1, fs=fps, score_threshold=0.5, iou_threshold=0.5)
-    return face_detector(video, inputs_shape, fps)
+    #return face_detector(video, inputs_shape, fps)
+    boxes, _ = face_detector(video, inputs_shape, fps)
+    return boxes

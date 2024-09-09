@@ -1,6 +1,8 @@
 
 
 import abc
+import logging
+import cv2
 import numpy as np
 from prpy.constants import SECONDS_PER_MINUTE
 from prpy.numpy.face import get_roi_from_det
@@ -57,12 +59,44 @@ class SimpleRPPGMethod(RPPGMethod):
       note: A dictionary with notes on the estimated vital signs.
       live: Dummy live confidence estimation (set to always 1). Shape (1, n_frames)
     """
+    # If frames is a file path, load the video into a NumPy array
+    if isinstance(frames, str):
+        cap = cv2.VideoCapture(frames)
+        frames = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frames.append(frame)
+        frames = np.array(frames)
+        cap.release()
+    logging.info(f"Frames shape: {frames.shape}")
+    logging.info(f"Faces shape: {faces.shape}")
+    logging.info(f"Original faces shape: {faces.shape}, contents: {faces}")
+    # If there's an extra dimension, remove it
+    if len(faces.shape) == 3 and faces.shape[1] == 1:
+        faces = np.squeeze(faces, axis=1)
+        logging.info(f"Reshaped faces to: {faces.shape}")
+    # Ensure faces have the correct shape (n_frames, 4)
+    if len(faces.shape) != 2 or faces.shape[1] != 4:
+        raise ValueError(f"Faces must be in shape (n_frames, 4), but got {faces.shape}")
     # Compute temporal union of ROIs
     u_roi = merge_faces(faces)
-    faces = faces - [u_roi[0], u_roi[1], u_roi[0], u_roi[1]]
+    #faces = faces - [u_roi[0], u_roi[1], u_roi[0], u_roi[1]]
+     # Ensure u_roi is of type int64 and has the correct shape
+    u_roi = u_roi.astype(np.int64)
+    logging.info(f"Unified ROI shape: {u_roi.shape}, contents: {u_roi}")
+
+    # Check if the number of frames in u_roi matches frames
+    if u_roi.shape[0] != frames.shape[0]:
+        raise ValueError(f"Number of ROIs {u_roi.shape[0]} must match the number of frames {frames.shape[0]}")
+    # Ensure the ROI is repeated for each frame
+    if u_roi.shape[0] == 4:  # If there's only one ROI, expand it for all frames
+      u_roi = np.tile(u_roi, (frames.shape[0], 1))  # Repeat the ROI for all frames
+      logging.info(f"Expanded ROI shape: {u_roi.shape}, contents: {u_roi[0]} for first frame")
     # Reduce ROI and extract RGB signal
     roi_ds = np.asarray([get_roi_from_det(f, roi_method=self.roi_method) for f in faces], dtype=np.int64)  # ROI for each frame (n, 4)
-    rgb_ds = reduce_roi(video=frames, roi=roi_ds)  # RGB signal for each frame (n, 3)
+    rgb_ds = reduce_roi(video=frames, roi=u_roi)  # RGB signal for each frame (n, 3)
 
     # Perform rPPG algorithm step
     sig_ds = self.algorithm(rgb_ds, fps)
@@ -98,5 +132,5 @@ class SimpleRPPGMethod(RPPGMethod):
         note[name] = 'Estimate of the ppg waveform using {} method. This method is not capable of providing a confidence estimate, hence returning 1.'.format(self.model)
     # Return results
     #return data, unit, conf, note, np.ones_like(sig)
-    return data, unit, conf, note, np.ones_like(sig),rgb_ds
+    return data, unit, conf, note, np.ones_like(sig)
   
